@@ -1,3 +1,4 @@
+use const_generic_wrap::ConstWrap;
 use core::fmt::Debug;
 use num_traits::{
     ops::overflowing::{OverflowingAdd, OverflowingMul},
@@ -21,7 +22,7 @@ where
 {
     pub fn new(value: T) -> Self
     where
-        B: Default,
+        B: ConstWrap<BaseType = T>,
     {
         Self::new_with_bound(value, B::default())
     }
@@ -53,139 +54,12 @@ where
     }
 }
 
-impl<T, B> Display for ModInt<T, B>
-where
-    T: Rem<T, Output = T> + Display,
-    B: Into<T>,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
-    }
-}
-
-impl<T, B> From<T> for ModInt<T, B>
-where
-    T: Rem<Output = T> + Clone + PartialOrd + Zero,
-    B: Into<T> + Clone + Default,
-{
-    fn from(value: T) -> Self {
-        Self::new(value)
-    }
-}
-
-impl<T, B> From<(T, B)> for ModInt<T, B>
-where
-    T: Rem<Output = T> + Clone + PartialOrd + Zero,
-    B: Into<T> + Clone + Default,
-{
-    fn from(value: (T, B)) -> Self {
-        Self::new_with_bound(value.0, value.1)
-    }
-}
-
-impl<T, B> Add<ModInt<T, B>> for ModInt<T, B>
-where
-    T: Bounded + Clone + OverflowingAdd + PartialOrd + Rem<Output = T> + Zero,
-    B: Clone + Debug + Into<T> + PartialEq<B>,
-{
-    type Output = ModInt<T, B>;
-    fn add(self, rhs: ModInt<T, B>) -> Self::Output {
-        debug_assert_eq!(self.bound, rhs.bound);
-        let (v, o) = self.value.overflowing_add(&rhs.value);
-        let value = if o {
-            let b = self.bound_val();
-            T::max_value() % b.clone() + v % b
-        } else {
-            v
-        };
-        ModInt::new_with_bound(value, self.bound)
-    }
-}
-
-impl<T, B> Sub<ModInt<T, B>> for ModInt<T, B>
-where
-    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingAdd + Sub<Output = T>,
-    B: Into<T> + PartialEq<B> + Clone + Debug,
-{
-    type Output = ModInt<T, B>;
-    fn sub(self, rhs: ModInt<T, B>) -> Self::Output {
-        debug_assert_eq!(self.bound, rhs.bound);
-        self + (-rhs)
-    }
-}
-
-impl<T, B> Mul<ModInt<T, B>> for ModInt<T, B>
-where
-    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingMul,
-    B: Into<T> + PartialEq<B> + Clone + Debug,
-{
-    type Output = ModInt<T, B>;
-    fn mul(self, rhs: ModInt<T, B>) -> Self::Output {
-        debug_assert_eq!(self.bound, rhs.bound);
-        let (v, o) = self.value.overflowing_mul(&rhs.value);
-        let value = if o {
-            let b = self.bound_val();
-            T::max_value() % b.clone() + v % b
-        } else {
-            v
-        };
-        ModInt::new_with_bound(value, self.bound)
-    }
-}
-
-impl<T, B> Neg for ModInt<T, B>
-where
-    T: PartialOrd<T> + Clone + Rem<Output = T> + Sub<Output = T> + Zero,
-    B: Into<T> + Clone,
-{
-    type Output = Self;
-    fn neg(self) -> Self {
-        unsafe { Self::new_unchecked(self.bound_val() - self.value, self.bound) }
-    }
-}
-
-impl<T, B> Zero for ModInt<T, B>
-where
-    T: Bounded + Clone + OverflowingAdd + PartialOrd + Rem<Output = T> + Zero,
-    B: Clone + Debug + Into<T> + PartialEq<B> + Default,
-{
-    fn zero() -> Self {
-        ModInt::new(T::zero())
-    }
-
-    fn is_zero(&self) -> bool {
-        self.value.is_zero()
-    }
-}
-
-impl<T, B> One for ModInt<T, B>
-where
-    T: Bounded
-        + Clone
-        + OverflowingAdd
-        + OverflowingMul
-        + PartialOrd
-        + Rem<Output = T>
-        + Zero
-        + One,
-    B: Clone + Debug + Into<T> + PartialEq<B> + Default,
-{
-    fn one() -> Self {
-        ModInt::new(T::one())
-    }
-
-    fn is_one(&self) -> bool {
-        self.value.is_one()
-    }
-}
-
-impl<T, B> Inv for ModInt<T, B>
+impl<T, B> ModInt<T, B>
 where
     T: PartialOrd<T> + Clone + Num + Bounded + Debug,
     B: Into<T> + Clone,
 {
-    type Output = Self;
-    fn inv(self) -> Self {
+    pub fn checked_inv(self) -> Option<Self> {
         let b = self.bound_val();
 
         let (rs, rr) = if T::zero() == T::min_value() {
@@ -250,16 +124,170 @@ where
             )
         };
 
-        assert!(
-            rr == T::one(),
-            "Cannot Inverse {:?} for mod {:?}",
-            self.value,
-            b
-        );
-        Self::new_with_bound(rs, self.bound)
+        if rr == T::one() {
+            None
+        } else {
+            Some(Self::new_with_bound(rs, self.bound))
+        }
     }
 }
 
+impl<T, B> Display for ModInt<T, B>
+where
+    T: Rem<T, Output = T> + Display,
+    B: Into<T>,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.value.fmt(f)
+    }
+}
+
+impl<T, B> From<T> for ModInt<T, B>
+where
+    T: Rem<Output = T> + Clone + PartialOrd + Zero,
+    B: ConstWrap<BaseType = T> + Into<T> + Clone + Default,
+{
+    fn from(value: T) -> Self {
+        Self::new(value)
+    }
+}
+
+impl<T, B> From<(T, B)> for ModInt<T, B>
+where
+    T: Rem<Output = T> + Clone + PartialOrd + Zero,
+    B: Into<T> + Clone + Default,
+{
+    fn from(value: (T, B)) -> Self {
+        Self::new_with_bound(value.0, value.1)
+    }
+}
+
+impl<T, B> Add<ModInt<T, B>> for ModInt<T, B>
+where
+    T: Bounded + Clone + OverflowingAdd + PartialOrd + Rem<Output = T> + Zero,
+    B: Clone + Debug + Into<T> + PartialEq<B>,
+{
+    type Output = Self;
+    fn add(self, rhs: ModInt<T, B>) -> Self::Output {
+        debug_assert_eq!(self.bound, rhs.bound);
+        let (v, o) = self.value.overflowing_add(&rhs.value);
+        let value = if o {
+            let b = self.bound_val();
+            T::max_value() % b.clone() + v % b
+        } else {
+            v
+        };
+        ModInt::new_with_bound(value, self.bound)
+    }
+}
+
+impl<T, B> Sub<ModInt<T, B>> for ModInt<T, B>
+where
+    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingAdd + Sub<Output = T>,
+    B: Into<T> + PartialEq<B> + Clone + Debug,
+{
+    type Output = Self;
+    fn sub(self, rhs: ModInt<T, B>) -> Self::Output {
+        debug_assert_eq!(self.bound, rhs.bound);
+        self + (-rhs)
+    }
+}
+
+impl<T, B> Mul<ModInt<T, B>> for ModInt<T, B>
+where
+    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingMul,
+    B: Into<T> + PartialEq<B> + Clone + Debug,
+{
+    type Output = Self;
+    fn mul(self, rhs: ModInt<T, B>) -> Self::Output {
+        debug_assert_eq!(self.bound, rhs.bound);
+        let (v, o) = self.value.overflowing_mul(&rhs.value);
+        let value = if o {
+            let b = self.bound_val();
+            T::max_value() % b.clone() + v % b
+        } else {
+            v
+        };
+        ModInt::new_with_bound(value, self.bound)
+    }
+}
+
+impl<T, B> Neg for ModInt<T, B>
+where
+    T: PartialOrd<T> + Clone + Rem<Output = T> + Sub<Output = T> + Zero,
+    B: Into<T> + Clone,
+{
+    type Output = Self;
+    fn neg(self) -> Self {
+        unsafe { Self::new_unchecked(self.bound_val() - self.value, self.bound) }
+    }
+}
+
+impl<T, B> Zero for ModInt<T, B>
+where
+    T: Bounded + Clone + OverflowingAdd + PartialOrd + Rem<Output = T> + Zero,
+    B: Clone + Debug + Into<T> + PartialEq<B> + ConstWrap<BaseType = T>,
+{
+    fn zero() -> Self {
+        ModInt::new(T::zero())
+    }
+
+    fn is_zero(&self) -> bool {
+        self.value.is_zero()
+    }
+}
+
+impl<T, B> One for ModInt<T, B>
+where
+    T: Bounded
+        + Clone
+        + OverflowingAdd
+        + OverflowingMul
+        + PartialOrd
+        + Rem<Output = T>
+        + Zero
+        + One,
+    B: Clone + Debug + Into<T> + PartialEq<B> + ConstWrap<BaseType = T>,
+{
+    fn one() -> Self {
+        ModInt::new(T::one())
+    }
+
+    fn is_one(&self) -> bool {
+        self.value.is_one()
+    }
+}
+
+/// Calculate [Modular multiplicative inverse](https://en.wikipedia.org/wiki/Modular_multiplicative_inverse).
+impl<T, B> Inv for ModInt<T, B>
+where
+    T: PartialOrd<T> + Clone + Num + Bounded + Debug,
+    B: Into<T> + Clone,
+{
+    type Output = Self;
+    fn inv(self) -> Self {
+        self.clone().checked_inv().expect(&format!(
+            "Cannot inverse. {:?} and {:?} is not coprimpe",
+            self.value(),
+            self.bound_val()
+        ))
+    }
+}
+
+/// ```
+/// # use modulo_int::*;
+/// use num_traits::*;
+/// use const_generic_wrap::*;
+/// let c17 = WrapI32::<17>;
+/// for i in 1..17 {
+///     let l = ModInt::new_with_bound(i, c17);
+///     for j in 1..17 {
+///         let r = ModInt::new_with_bound(j, c17);
+///         assert_eq!(l * r.inv(), l / r);
+///         assert_eq!(l, (l / r) * r);
+///     }
+/// }
+/// ```
 impl<T, B> Div for ModInt<T, B>
 where
     T: PartialOrd<T> + Clone + Num + Bounded + Debug + Bounded + OverflowingMul,
@@ -269,6 +297,44 @@ where
 
     fn div(self, rhs: Self) -> Self::Output {
         self * (rhs.inv())
+    }
+}
+
+impl<T, B> Rem for ModInt<T, B>
+where
+    T: PartialOrd<T> + Clone + Num,
+    B: Into<T> + Clone,
+{
+    type Output = Self;
+
+    fn rem(self, rhs: Self) -> Self {
+        Self::new_with_bound(self.value % rhs.value, self.bound)
+    }
+}
+
+impl<T, B> Num for ModInt<T, B>
+where
+    T: Num + Bounded + Clone + Debug + PartialOrd<T> + OverflowingAdd + OverflowingMul,
+    B: Clone + Debug + ConstWrap<BaseType = T> + Into<T> + PartialEq,
+{
+    type FromStrRadixErr = T::FromStrRadixErr;
+
+    fn from_str_radix(str: &str, radix: u32) -> Result<Self, Self::FromStrRadixErr> {
+        T::from_str_radix(str, radix).map(|x| Self::new(x))
+    }
+}
+
+impl<T, B> Bounded for ModInt<T, B>
+where
+    T: Rem<T, Output = T> + Zero + Clone + PartialOrd,
+    B: Into<T> + Clone + ConstWrap<BaseType = T>,
+{
+    fn min_value() -> Self {
+        T::zero().into()
+    }
+
+    fn max_value() -> Self {
+        B::default().into().into()
     }
 }
 
@@ -333,6 +399,18 @@ mod tests {
             let l = ModInt::new_with_bound(i, c17);
             assert_eq!(i, *l.value());
             assert_eq!(1, *(l * l.inv()).value());
+        }
+    }
+
+    #[test]
+    fn div() {
+        let c17 = WrapI32::<17>;
+        for i in 1..17 {
+            let l = ModInt::new_with_bound(i, c17);
+            for j in 1..17 {
+                let r = ModInt::new_with_bound(j, c17);
+                assert_eq!(l, (l / r) * r);
+            }
         }
     }
 }
