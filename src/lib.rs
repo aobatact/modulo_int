@@ -188,7 +188,7 @@ where
     fn inv(self) -> Self {
         let b = self.bound_val();
 
-        if T::zero() == T::min_value() {
+        let (rs, rr) = if T::zero() == T::min_value() {
             //unsigned
             let mut s = (T::zero(), T::one(), false, false);
             let mut r = (b.clone(), self.value.clone(), false, false);
@@ -200,23 +200,13 @@ where
                     core::mem::swap(&mut r.0, &mut r.1);
                     core::mem::swap(&mut r.2, &mut r.3);
                     let m = q.clone() * r.1.clone();
-                    let m_s = q_s ^ r.3;
-                    let rr = match (r.2, m_s) {
-                        (true, true) => {
-                            if r.0 > m {
-                                (r.0 - m, true)
-                            } else {
-                                (m - r.0, false)
-                            }
-                        }
-                        (true, false) => (r.0 + m, true),
-                        (false, true) => (r.0 + m, false),
-                        (false, false) => {
-                            if r.0 > m {
-                                (r.0 - m, false)
-                            } else {
-                                (m - r.0, true)
-                            }
+                    let rr = if (q_s ^ r.3) ^ r.2 {
+                        (r.0 + m, r.2)
+                    } else {
+                        if r.0 > m {
+                            (r.0 - m, r.2)
+                        } else {
+                            (m - r.0, !r.2)
                         }
                     };
                     r.0 = rr.0;
@@ -226,18 +216,14 @@ where
                 r = f(r);
                 s = f(s);
             }
-            assert!(
-                T::one()
-                    == if r.3 {
-                        b.clone() - r.1.clone()
-                    } else {
-                        r.1.clone()
-                    },
-                "Cannot Inverse {:?} for mod {:?}",
-                self.value,
-                b.clone()
-            );
-            Self::new_with_bound(if s.3 { b - s.1 } else { s.1 }, self.bound)
+            (
+                if s.3 { b.clone() - s.1 } else { s.1 },
+                if r.3 {
+                    b.clone() - r.1.clone()
+                } else {
+                    r.1.clone()
+                },
+            )
         } else {
             // signed
             let mut s = (T::zero(), T::one());
@@ -254,20 +240,23 @@ where
                 r = f(r);
                 s = f(s);
             }
+            (
+                s.1,
+                if r.1 < T::zero() {
+                    b.clone() - r.1.clone()
+                } else {
+                    r.1.clone()
+                },
+            )
+        };
 
-            assert!(
-                T::one()
-                    == if r.1 < T::zero() {
-                        b.clone() - r.1.clone()
-                    } else {
-                        r.1.clone()
-                    },
-                "Cannot Inverse {:?} for mod {:?}",
-                self.value,
-                b.clone()
-            );
-            Self::new_with_bound(s.1, self.bound)
-        }
+        assert!(
+            rr == T::one(),
+            "Cannot Inverse {:?} for mod {:?}",
+            self.value,
+            b
+        );
+        Self::new_with_bound(rs, self.bound)
     }
 }
 
@@ -330,15 +319,20 @@ mod tests {
     #[test]
     fn inv_u() {
         let c17 = WrapU32::<17>;
-        let l = ModInt::new_with_bound(11, c17);
-        assert_eq!(11, *l.value());
-        assert_eq!(1, *(l * l.inv()).value());
+        for i in 1..17 {
+            let l = ModInt::new_with_bound(i, c17);
+            assert_eq!(i, *l.value());
+            assert_eq!(1, *(l * l.inv()).value());
+        }
     }
+
     #[test]
     fn inv_i() {
         let c17 = WrapI32::<17>;
-        let l = ModInt::new_with_bound(11, c17);
-        assert_eq!(11, *l.value());
-        assert_eq!(1, *(l * l.inv()).value());
+        for i in 1..17 {
+            let l = ModInt::new_with_bound(i, c17);
+            assert_eq!(i, *l.value());
+            assert_eq!(1, *(l * l.inv()).value());
+        }
     }
 }
