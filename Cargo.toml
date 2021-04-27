@@ -9,4 +9,4 @@ edition = "2018"
 [dependencies]
 const-generic-wrap = {version = "0.1.0"}
 num-traits = "0.2.12"
-num-integer = "0.1.44"
+num-integer = {version = "0.1.44", optional = true }
