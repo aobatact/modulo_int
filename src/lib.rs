@@ -5,18 +5,54 @@ use num_traits::{
     Bounded, Inv, Num, One, Pow, ToPrimitive, Unsigned, WrappingAdd, WrappingMul, WrappingNeg,
     WrappingSub, Zero,
 };
-use std::{fmt::Display, ops::*};
+use std::{
+    fmt::{Display, Write},
+    ops::*,
+};
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord)]
-pub struct ModInt<T, M> {
+pub struct ModInt<T, M = T> {
     value: T,
     modulo: M,
 }
+
+/// Alias of [`ModInt`] for [`u32`]
+/// ```
+/// # use modulo_int::*;
+/// # use const_generic_wrap::*;
+/// assert_eq!(ModU32::<17>::new(12), ModInt::new_with_modulo(12, WrapU32::<17>));
+/// ```
+pub type ModU32<const N: u32> = ModInt<u32, const_generic_wrap::WrapU32<N>>;
+
+/// Alias of [`ModInt`] for [`u64`]
+/// ```
+/// # use modulo_int::*;
+/// # use const_generic_wrap::*;
+/// assert_eq!(ModU64::<17>::new(12), ModInt::new_with_modulo(12, WrapU64::<17>));
+/// ```
+pub type ModU64<const N: u64> = ModInt<u64, const_generic_wrap::WrapU64<N>>;
+
+/// Alias of [`ModInt`] for [`i32`]
+/// ```
+/// # use modulo_int::*;
+/// # use const_generic_wrap::*;
+/// assert_eq!(ModI32::<17>::new(12), ModInt::new_with_modulo(12, WrapI32::<17>));
+/// ```
+pub type ModI32<const N: i32> = ModInt<i32, const_generic_wrap::WrapI32<N>>;
+
+/// Alias of [`ModInt`] for [`i64`]
+/// ```
+/// # use modulo_int::*;
+/// # use const_generic_wrap::*;
+/// assert_eq!(ModI64::<17>::new(12), ModInt::new_with_modulo(12, WrapI64::<17>));
+/// ```
+pub type ModI64<const N: i64> = ModInt<i64, const_generic_wrap::WrapI64<N>>;
 
 impl<T, M> ModInt<T, M>
 where
     T: Rem<Output = T> + Clone + PartialOrd + Zero,
     M: Into<T> + Clone,
 {
+    /// Creates new [`ModInt`] with [`ConstWrap`]. The modulo is selected statically by const generics.
     pub fn new(value: T) -> Self
     where
         M: ConstWrap<BaseType = T>,
@@ -24,37 +60,43 @@ where
         Self::new_with_modulo(value, M::default())
     }
 
+    /// Creates new [`ModInt`]. Modulo should be positive.
     pub fn new_with_modulo(value: T, modulo: M) -> Self {
         let t_modulo = modulo.clone().into();
-        debug_assert!(t_modulo > T::zero());
+        assert!(t_modulo > T::zero(), "modulo must be positive number");
         let v = value.clone() % t_modulo.clone();
         Self {
             value: if v < T::zero() { t_modulo + v } else { v },
             modulo,
         }
     }
-}
 
-impl<T, M> ModInt<T, M>
-where
-    T: Rem<Output = T>,
-    M: Into<T>,
-{
+    /// Creates new [`ModInt`] with out checking whether `modulo > 0` and `0 <= value < modulo`.
     pub unsafe fn new_unchecked(value: T, modulo: M) -> Self {
         Self { value, modulo }
     }
 
+    /// Creates new [`ModInt`] with the value set to zero.
+    pub fn zero_with_modulo(modulo: M) -> Self {
+        Self::new_with_modulo(T::zero(), modulo)
+    }
+}
+
+impl<T, M> ModInt<T, M> {
+    /// Gets the modulo.
     pub fn modulo(&self) -> &M {
         &self.modulo
     }
 
+    /// Gets the modulo converted to the value type.
     pub fn modulo_val(&self) -> T
     where
-        M: Clone,
+        M: Clone + Into<T>,
     {
         self.modulo.clone().into()
     }
 
+    /// Gets the value.
     pub fn value(&self) -> &T {
         &self.value
     }
@@ -65,13 +107,18 @@ where
     T: PartialOrd<T> + Clone + Num + Bounded + Debug,
     M: Into<T> + Clone,
 {
+    /// Try to get the modular inverse. It will return [`None`] if `value` and `modulo` is not coprime.
+    #[inline]
     pub fn checked_inv(&self) -> Option<Self> {
         let b = self.modulo_val();
 
-        let (rs, rr) = if T::zero() == T::min_value() {
+        fn unsigned<T>(b: T, v: T) -> (T, T)
+        where
+            T: PartialOrd<T> + Clone + Num,
+        {
             //unsigned
             let mut s = (T::zero(), T::one(), false, false);
-            let mut r = (b.clone(), self.value.clone(), false, false);
+            let mut r = (b.clone(), v, false, false);
 
             while !r.0.is_zero() {
                 let q = r.1.clone() / r.0.clone();
@@ -104,10 +151,14 @@ where
                     r.1.clone()
                 },
             )
-        } else {
+        }
+        fn signed<T>(b: T, v: T) -> (T, T)
+        where
+            T: PartialOrd<T> + Clone + Num,
+        {
             // signed
             let mut s = (T::zero(), T::one());
-            let mut r = (b.clone(), self.value.clone());
+            let mut r = (b.clone(), v);
 
             while !r.0.is_zero() {
                 let q = r.1.clone() / r.0.clone();
@@ -128,6 +179,12 @@ where
                     r.1.clone()
                 },
             )
+        }
+
+        let (rs, rr) = if T::zero() == T::min_value() {
+            unsigned(b, self.value.clone())
+        } else {
+            signed(b, self.value.clone())
         };
 
         if rr != T::one() {
@@ -141,10 +198,13 @@ where
 impl<T, M> Display for ModInt<T, M>
 where
     T: Display,
-    M: Into<T>,
+    M: Into<T> + Clone,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.value.fmt(f)
+        self.value.fmt(f)?;
+        f.write_str(" mod( ")?;
+        self.modulo_val().fmt(f)?;
+        f.write_char(')')
     }
 }
 
@@ -549,6 +609,16 @@ mod tests {
     use const_generic_wrap::*;
 
     #[test]
+    fn new() {
+        let c17 = WrapU32::<17>;
+        let l = ModInt::new_with_modulo(11, c17);
+        let l2 = ModInt::new(11);
+        assert_eq!(l, l2);
+        let r = ModInt::new_with_modulo(28_u32, 17_u32);
+        assert_eq!(l.value(), r.value());
+    }
+
+    #[test]
     fn add() {
         let c17 = WrapU32::<17>;
         let l = ModInt::new_with_modulo(11, c17);
@@ -566,8 +636,7 @@ mod tests {
 
     #[test]
     fn sub() {
-        let c17 = WrapU32::<17>;
-        let l = ModInt::new_with_modulo(11, c17);
+        let l = ModU32::<17>::new(11);
         assert_eq!(11, *l.value());
         let r = 35.into();
         let lr = l - r;
@@ -579,8 +648,7 @@ mod tests {
 
     #[test]
     fn mul() {
-        let c17 = WrapU32::<17>;
-        let l = ModInt::new_with_modulo(11, c17);
+        let l = ModU32::<17>::new(11);
         assert_eq!(11, *l.value());
         let r = 35.into();
         let lr = l * r;
@@ -626,5 +694,11 @@ mod tests {
                 assert_eq!(l, (l / r) * r);
             }
         }
+    }
+
+    #[test]
+    fn display() {
+        let l = ModU32::<17>::new(11);
+        assert_eq!("11 mod( 17)", l.to_string());
     }
 }
