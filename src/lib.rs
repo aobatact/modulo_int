@@ -575,7 +575,7 @@ where
 
 impl<T, M> Bounded for ModInt<T, M>
 where
-    T: Rem<T, Output = T> + Zero + Clone + PartialOrd,
+    T: Rem<T, Output = T> + Zero + One + Clone + PartialOrd + Sub<Output = T>,
     M: Into<T> + Clone + ConstWrap<BaseType = T>,
 {
     fn min_value() -> Self {
@@ -583,7 +583,7 @@ where
     }
 
     fn max_value() -> Self {
-        M::default().into().into()
+        (M::default().into() - T::one()).into()
     }
 }
 
