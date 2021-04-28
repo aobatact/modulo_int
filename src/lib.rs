@@ -2,15 +2,12 @@ use const_generic_wrap::ConstWrap;
 use core::fmt::Debug;
 use num_traits::{
     ops::overflowing::{OverflowingAdd, OverflowingMul},
-    Bounded, Inv, Num, One, Pow, ToPrimitive, Zero,
+    Bounded, Inv, Num, One, Pow, ToPrimitive, Unsigned, WrappingAdd, WrappingMul, WrappingNeg,
+    WrappingSub, Zero,
 };
 use std::{fmt::Display, ops::*};
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, PartialOrd, Ord)]
-pub struct ModInt<T, M>
-where
-    T: Rem<T, Output = T>,
-    M: Into<T>,
-{
+pub struct ModInt<T, M> {
     value: T,
     modulo: M,
 }
@@ -68,7 +65,7 @@ where
     T: PartialOrd<T> + Clone + Num + Bounded + Debug,
     M: Into<T> + Clone,
 {
-    pub fn checked_inv(self) -> Option<Self> {
+    pub fn checked_inv(&self) -> Option<Self> {
         let b = self.modulo_val();
 
         let (rs, rr) = if T::zero() == T::min_value() {
@@ -136,14 +133,14 @@ where
         if rr != T::one() {
             None
         } else {
-            Some(Self::new_with_modulo(rs, self.modulo))
+            Some(Self::new_with_modulo(rs, self.modulo.clone()))
         }
     }
 }
 
 impl<T, M> Display for ModInt<T, M>
 where
-    T: Rem<T, Output = T> + Display,
+    T: Display,
     M: Into<T>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -190,6 +187,36 @@ where
     }
 }
 
+impl<T, M> Add<&ModInt<T, M>> for &ModInt<T, M>
+where
+    T: Bounded + Clone + OverflowingAdd + PartialOrd + Rem<Output = T> + Zero,
+    M: Clone + Debug + Into<T> + PartialEq<M>,
+{
+    type Output = ModInt<T, M>;
+    fn add(self, rhs: &ModInt<T, M>) -> Self::Output {
+        debug_assert_eq!(self.modulo, rhs.modulo);
+        let (v, o) = self.value.overflowing_add(&rhs.value);
+        let value = if o {
+            let b = self.modulo_val();
+            T::max_value() % b.clone() + v % b
+        } else {
+            v
+        };
+        ModInt::new_with_modulo(value, self.modulo.clone())
+    }
+}
+
+/// Same as [`Add`] because [`Add::add`] is wrapping.
+impl<T, M> WrappingAdd for ModInt<T, M>
+where
+    Self: Add<Output = Self>,
+    for<'a> &'a Self: Add<Output = Self>,
+{
+    fn wrapping_add(&self, v: &Self) -> Self {
+        self.add(v)
+    }
+}
+
 impl<T, M> Sub<ModInt<T, M>> for ModInt<T, M>
 where
     T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingAdd + Sub<Output = T>,
@@ -199,6 +226,29 @@ where
     fn sub(self, rhs: ModInt<T, M>) -> Self::Output {
         debug_assert_eq!(self.modulo, rhs.modulo);
         self + (-rhs)
+    }
+}
+
+impl<T, M> Sub<&ModInt<T, M>> for &ModInt<T, M>
+where
+    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingAdd + Sub<Output = T>,
+    M: Into<T> + PartialEq<M> + Clone + Debug,
+{
+    type Output = ModInt<T, M>;
+    fn sub(self, rhs: &ModInt<T, M>) -> Self::Output {
+        debug_assert_eq!(self.modulo, rhs.modulo);
+        self + &(-rhs)
+    }
+}
+
+/// Same as [`Sub`] because [`Sub::sub`] is wrapping.
+impl<T, M> WrappingSub for ModInt<T, M>
+where
+    Self: Sub<Output = Self>,
+    for<'a> &'a Self: Sub<Output = Self>,
+{
+    fn wrapping_sub(&self, rhs: &ModInt<T, M>) -> Self {
+        self - rhs
     }
 }
 
@@ -221,6 +271,36 @@ where
     }
 }
 
+impl<T, M> Mul<&ModInt<T, M>> for &ModInt<T, M>
+where
+    T: Rem<Output = T> + Clone + PartialOrd<T> + Zero + Bounded + OverflowingMul,
+    M: Into<T> + PartialEq<M> + Clone + Debug,
+{
+    type Output = ModInt<T, M>;
+    fn mul(self, rhs: &ModInt<T, M>) -> Self::Output {
+        debug_assert_eq!(self.modulo, rhs.modulo);
+        let (v, o) = self.value.overflowing_mul(&rhs.value);
+        let value = if o {
+            let b = self.modulo_val();
+            T::max_value() % b.clone() + v % b
+        } else {
+            v
+        };
+        ModInt::new_with_modulo(value, self.modulo.clone())
+    }
+}
+
+/// Same as [`Mul`] because [`Mul::mul`] is wrapping.
+impl<T, M> WrappingMul for ModInt<T, M>
+where
+    Self: Mul<Output = Self>,
+    for<'a> &'a Self: Mul<Output = Self>,
+{
+    fn wrapping_mul(&self, rhs: &ModInt<T, M>) -> Self {
+        self * rhs
+    }
+}
+
 impl<T, M> Neg for ModInt<T, M>
 where
     T: PartialOrd<T> + Clone + Rem<Output = T> + Sub<Output = T> + Zero,
@@ -231,6 +311,27 @@ where
         debug_assert!(self.value < self.modulo_val());
         debug_assert!(self.value >= T::zero());
         unsafe { Self::new_unchecked(self.modulo_val() - self.value, self.modulo) }
+    }
+}
+
+impl<T, M> Neg for &ModInt<T, M>
+where
+    T: PartialOrd<T> + Clone + Rem<Output = T> + Sub<Output = T> + Zero,
+    M: Into<T> + Clone,
+{
+    type Output = ModInt<T, M>;
+    fn neg(self) -> ModInt<T, M> {
+        self.clone().neg()
+    }
+}
+
+/// Same as [`Neg`] because [`Neg::neg`] is wrapping.
+impl<T, M> WrappingNeg for ModInt<T, M>
+where
+    for<'a> &'a Self: Neg<Output = Self>,
+{
+    fn wrapping_neg(&self) -> ModInt<T, M> {
+        self.neg()
     }
 }
 
@@ -275,8 +376,20 @@ where
     T: PartialOrd<T> + Clone + Num + Bounded + Debug,
     M: Into<T> + Clone,
 {
-    type Output = Self;
-    fn inv(self) -> Self {
+    type Output = ModInt<T, M>;
+    fn inv(self) -> ModInt<T, M> {
+        (&self).inv()
+    }
+}
+
+/// Calculate [Modular multiplicative inverse](https://en.wikipedia.org/wiki/Modular_multiplicative_inverse).
+impl<T, M> Inv for &ModInt<T, M>
+where
+    T: PartialOrd<T> + Clone + Num + Bounded + Debug,
+    M: Into<T> + Clone,
+{
+    type Output = ModInt<T, M>;
+    fn inv(self) -> ModInt<T, M> {
         self.clone().checked_inv().expect(&format!(
             "Cannot inverse. {:?} and {:?} is not coprimpe.",
             self.value(),
@@ -311,15 +424,40 @@ where
     }
 }
 
+impl<T, M> Div for &ModInt<T, M>
+where
+    T: PartialOrd<T> + Clone + Num + Bounded + Debug + Bounded + OverflowingMul,
+    M: Into<T> + PartialEq<M> + Clone + Debug,
+{
+    type Output = ModInt<T, M>;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self * &(rhs.inv())
+    }
+}
+
 impl<T, M> Rem for ModInt<T, M>
 where
-    T: PartialOrd<T> + Clone + Num,
+    T: Rem<Output = T> + PartialOrd<T> + Clone + Zero,
     M: Into<T> + Clone,
 {
     type Output = Self;
 
     fn rem(self, rhs: Self) -> Self {
         Self::new_with_modulo(self.value % rhs.value, self.modulo)
+    }
+}
+
+impl<T, M> Rem for &ModInt<T, M>
+where
+    T: Rem<Output = T> + PartialOrd<T> + Clone + Zero,
+    for<'a> &'a T: Rem<Output = T>,
+    M: Into<T> + Clone,
+{
+    type Output = ModInt<T, M>;
+
+    fn rem(self, rhs: Self) -> ModInt<T, M> {
+        ModInt::new_with_modulo(&self.value % &rhs.value, self.modulo.clone())
     }
 }
 
@@ -331,7 +469,22 @@ where
 {
     type Output = Self;
 
-    fn pow(self, mut rhs: E) -> Self {
+    /// mod pow
+    fn pow(self, rhs: E) -> Self {
+        self.clone().pow(rhs)
+    }
+}
+
+impl<T, M, E> Pow<E> for &ModInt<T, M>
+where
+    T: PartialOrd<T> + Clone + Num,
+    M: Into<T> + Clone,
+    E: BitAnd<Output = E> + Clone + One + PartialOrd + ShrAssign<usize> + Zero,
+{
+    type Output = ModInt<T, M>;
+
+    /// mod pow
+    fn pow(self, mut rhs: E) -> ModInt<T, M> {
         let mut value = self.value().clone();
         let modulo = self.modulo_val();
         let mut result = T::one();
@@ -344,7 +497,7 @@ where
             rhs >>= 1;
             value = (value.clone() * value) % modulo.clone();
         }
-        Self::new_with_modulo(result, self.modulo)
+        ModInt::new_with_modulo(result, self.modulo.clone())
     }
 }
 
@@ -387,6 +540,8 @@ where
         self.value().to_u64()
     }
 }
+
+impl<T, M> Unsigned for ModInt<T, M> where Self: Num {}
 
 #[cfg(test)]
 mod tests {
